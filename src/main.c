@@ -54,6 +54,9 @@ static struct Amitcp13BsdFdSet g_rfds;
 static struct Amitcp13BsdFdSet g_wfds;
 static struct Amitcp13BsdTimeVal g_timeout;
 static ULONG g_wait_signals;
+static LONG g_one;
+static int g_so_error;
+static int g_so_error_len;
 static char g_http_host[80];
 static char g_http_path[256];
 static char g_http_dummy_path[16];
@@ -116,6 +119,37 @@ static int call_recv(struct Library *base, int fd, void *buf, int len, int flags
 
     __asm volatile ("jsr a6@(-78:W)"
         : "+r" (d0), "+r" (a0), "+r" (d1), "+r" (d2)
+        : "r" (a6)
+        : "a1", "cc", "memory");
+    return d0;
+}
+
+static int call_getsockopt(struct Library *base, int fd, int level, int optname,
+                           void *optval, int *optlen)
+{
+    register int d0 __asm("d0") = fd;
+    register int d1 __asm("d1") = level;
+    register int d2 __asm("d2") = optname;
+    register void *a0 __asm("a0") = optval;
+    register int *a1 __asm("a1") = optlen;
+    register struct Library *a6 __asm("a6") = base;
+
+    __asm volatile ("jsr a6@(-96:W)"
+        : "+r" (d0), "+r" (d1), "+r" (d2), "+r" (a0), "+r" (a1)
+        : "r" (a6)
+        : "cc", "memory");
+    return d0;
+}
+
+static int call_ioctl(struct Library *base, int fd, ULONG request, void *argp)
+{
+    register int d0 __asm("d0") = fd;
+    register ULONG d1 __asm("d1") = request;
+    register void *a0 __asm("a0") = argp;
+    register struct Library *a6 __asm("a6") = base;
+
+    __asm volatile ("jsr a6@(-114:W)"
+        : "+r" (d0), "+r" (d1), "+r" (a0)
         : "r" (a6)
         : "a1", "cc", "memory");
     return d0;
@@ -284,6 +318,28 @@ static int send_all(struct Library *base, int fd, const char *buf, int len)
     return 1;
 }
 
+static int wait_for_connect(struct Library *base, int fd)
+{
+    int r;
+
+    AMITCP13_BSD_FD_ZERO(&g_wfds);
+    AMITCP13_BSD_FD_SET(fd, &g_wfds);
+    g_timeout.tv_sec = 20;
+    g_timeout.tv_usec = 0;
+    g_wait_signals = 0;
+    r = call_waitselect(base, fd + 1, 0, &g_wfds, &g_timeout);
+    if (r <= 0)
+        return 0;
+    if (!AMITCP13_BSD_FD_ISSET(fd, &g_wfds))
+        return 0;
+    g_so_error = -1;
+    g_so_error_len = sizeof(g_so_error);
+    if (call_getsockopt(base, fd, AMITCP13_SOL_SOCKET, AMITCP13_SO_ERROR,
+                        &g_so_error, &g_so_error_len) < 0)
+        return 0;
+    return g_so_error == 0;
+}
+
 static int open_http_socket(const char *url, char *path, int path_size)
 {
     UWORD port;
@@ -300,14 +356,23 @@ static int open_http_socket(const char *url, char *path, int path_size)
     fd = call_socket(SocketBase, AMITCP13_AF_INET, AMITCP13_SOCK_STREAM, AMITCP13_IPPROTO_TCP);
     if (fd < 0)
         return -1;
+    g_one = 1;
+    call_ioctl(SocketBase, fd, AMITCP13_FIONBIO, &g_one);
     memset(&g_addr, 0, sizeof(g_addr));
     g_addr.sin_len = sizeof(g_addr);
     g_addr.sin_family = AMITCP13_AF_INET;
     g_addr.sin_port = htons16(port);
     g_addr.sin_addr.s_addr = *(ULONG *)he->h_addr_list[0];
     if (call_connect(SocketBase, fd, (const struct Amitcp13BsdSockAddr *)&g_addr, sizeof(g_addr)) < 0) {
-        call_close_socket(SocketBase, fd);
-        return -1;
+        int err = call_errno(SocketBase);
+        if (err != AMITCP13_EINPROGRESS && err != AMITCP13_EALREADY) {
+            call_close_socket(SocketBase, fd);
+            return -1;
+        }
+        if (!wait_for_connect(SocketBase, fd)) {
+            call_close_socket(SocketBase, fd);
+            return -1;
+        }
     }
     return fd;
 }
