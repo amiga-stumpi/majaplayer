@@ -46,3 +46,13 @@ core so Stop can control playback directly.
 Output:
 
     build/MajaPlayer
+
+## Debug build
+
+For API/download troubleshooting:
+
+    make clean && make debug
+
+The debug build writes fetch diagnostics to:
+
+    RAM:MajaPlayer_debug.log

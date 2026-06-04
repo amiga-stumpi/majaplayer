@@ -25,6 +25,10 @@
 #define URL_SIZE 256
 #define STATUS_SIZE 96
 
+#ifndef MAJAPLAYER_DEBUG
+#define MAJAPLAYER_DEBUG 0
+#endif
+
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
 static struct Library *SocketBase;
@@ -64,6 +68,7 @@ static char g_http_req[384];
 static char g_http_buf[HTTP_BUF_SIZE];
 static char g_api_buf[API_BUF_SIZE];
 static char g_file_buf[1024];
+static char g_last_error[STATUS_SIZE];
 
 static int call_socket(struct Library *base, int domain, int type, int protocol)
 {
@@ -243,6 +248,79 @@ static void str_copy(char *dst, int dst_size, const char *src)
     dst[i] = 0;
 }
 
+static void debug_write(const char *text)
+{
+#if MAJAPLAYER_DEBUG
+    BPTR fh;
+    if (!text)
+        return;
+    fh = Open((STRPTR)"RAM:MajaPlayer_debug.log", MODE_READWRITE);
+    if (!fh)
+        fh = Open((STRPTR)"RAM:MajaPlayer_debug.log", MODE_NEWFILE);
+    if (!fh)
+        return;
+    Seek(fh, 0, OFFSET_END);
+    Write(fh, (APTR)text, str_len(text));
+    Write(fh, (APTR)"\n", 1);
+    Close(fh);
+#else
+    (void)text;
+#endif
+}
+
+static void debug_reset(void)
+{
+#if MAJAPLAYER_DEBUG
+    BPTR fh;
+    fh = Open((STRPTR)"RAM:MajaPlayer_debug.log", MODE_NEWFILE);
+    if (fh) {
+        Write(fh, (APTR)"MajaPlayer debug start\n", 23);
+        Close(fh);
+    }
+#endif
+}
+
+static void debug_i(const char *prefix, int value)
+{
+#if MAJAPLAYER_DEBUG
+    char num[16];
+    char line[96];
+    int pos = 0;
+    int i;
+    int neg;
+    ULONG v;
+
+    if (!prefix)
+        prefix = "";
+    while (*prefix && pos < (int)sizeof(line) - 1)
+        line[pos++] = *prefix++;
+    neg = value < 0;
+    v = neg ? (ULONG)(-value) : (ULONG)value;
+    i = sizeof(num) - 1;
+    num[i] = 0;
+    do {
+        --i;
+        num[i] = (char)('0' + (v % 10UL));
+        v /= 10UL;
+    } while (v && i > 0);
+    if (neg && i > 0)
+        num[--i] = '-';
+    while (num[i] && pos < (int)sizeof(line) - 1)
+        line[pos++] = num[i++];
+    line[pos] = 0;
+    debug_write(line);
+#else
+    (void)prefix;
+    (void)value;
+#endif
+}
+
+static void set_last_error(const char *status)
+{
+    str_copy(g_last_error, STATUS_SIZE, status);
+    debug_write(status);
+}
+
 static void set_status(struct AppState *app, const char *status)
 {
     str_copy(app->status, STATUS_SIZE, status);
@@ -328,6 +406,7 @@ static int wait_for_connect(struct Library *base, int fd)
     g_timeout.tv_usec = 0;
     g_wait_signals = 0;
     r = call_waitselect(base, fd + 1, 0, &g_wfds, &g_timeout);
+    debug_i("Connect WaitSelect ret=", r);
     if (r <= 0)
         return 0;
     if (!AMITCP13_BSD_FD_ISSET(fd, &g_wfds))
@@ -335,8 +414,11 @@ static int wait_for_connect(struct Library *base, int fd)
     g_so_error = -1;
     g_so_error_len = sizeof(g_so_error);
     if (call_getsockopt(base, fd, AMITCP13_SOL_SOCKET, AMITCP13_SO_ERROR,
-                        &g_so_error, &g_so_error_len) < 0)
+                        &g_so_error, &g_so_error_len) < 0) {
+        debug_i("SO_ERROR getsockopt errno=", call_errno(base));
         return 0;
+    }
+    debug_i("SO_ERROR value=", g_so_error);
     return g_so_error == 0;
 }
 
@@ -346,34 +428,53 @@ static int open_http_socket(const char *url, char *path, int path_size)
     struct hostent *he;
     int fd;
 
-    if (!SocketBase)
+    if (!SocketBase) {
+        set_last_error("bsdsocket missing");
         return -1;
-    if (!parse_http_url(url, g_http_host, sizeof(g_http_host), path, path_size, &port))
+    }
+    debug_write("HTTP parse URL");
+    if (!parse_http_url(url, g_http_host, sizeof(g_http_host), path, path_size, &port)) {
+        set_last_error("Bad URL");
         return -1;
+    }
+    debug_write("DNS start");
     he = call_gethostbyname(SocketBase, g_http_host);
-    if (!he || !he->h_addr_list || !he->h_addr_list[0])
+    if (!he || !he->h_addr_list || !he->h_addr_list[0]) {
+        debug_i("DNS errno=", call_errno(SocketBase));
+        set_last_error("DNS failed");
         return -1;
+    }
+    debug_write("DNS ok");
     fd = call_socket(SocketBase, AMITCP13_AF_INET, AMITCP13_SOCK_STREAM, AMITCP13_IPPROTO_TCP);
-    if (fd < 0)
+    debug_i("Socket fd=", fd);
+    if (fd < 0) {
+        debug_i("Socket errno=", call_errno(SocketBase));
+        set_last_error("Socket failed");
         return -1;
+    }
     g_one = 1;
-    call_ioctl(SocketBase, fd, AMITCP13_FIONBIO, &g_one);
+    debug_i("Ioctl ret=", call_ioctl(SocketBase, fd, AMITCP13_FIONBIO, &g_one));
     memset(&g_addr, 0, sizeof(g_addr));
     g_addr.sin_len = sizeof(g_addr);
     g_addr.sin_family = AMITCP13_AF_INET;
     g_addr.sin_port = htons16(port);
     g_addr.sin_addr.s_addr = *(ULONG *)he->h_addr_list[0];
+    debug_write("Connect start");
     if (call_connect(SocketBase, fd, (const struct Amitcp13BsdSockAddr *)&g_addr, sizeof(g_addr)) < 0) {
         int err = call_errno(SocketBase);
+        debug_i("Connect errno=", err);
         if (err != AMITCP13_EINPROGRESS && err != AMITCP13_EALREADY) {
             call_close_socket(SocketBase, fd);
+            set_last_error("Connect failed");
             return -1;
         }
         if (!wait_for_connect(SocketBase, fd)) {
             call_close_socket(SocketBase, fd);
+            set_last_error("Connect timeout");
             return -1;
         }
     }
+    debug_write("Connect ok");
     return fd;
 }
 
@@ -393,6 +494,7 @@ static int send_http_get(int fd, const char *host_path_url, const char *path)
     ADDTXT("\r\nConnection: close\r\n\r\n");
 #undef ADDTXT
     g_http_req[pos] = 0;
+    debug_i("HTTP request bytes=", pos);
     return send_all(SocketBase, fd, g_http_req, pos);
 }
 
@@ -421,13 +523,16 @@ static int recv_wait(int fd, char *buf, int len)
     g_timeout.tv_usec = 0;
     g_wait_signals = 0;
     r = call_waitselect(SocketBase, fd + 1, &g_rfds, 0, &g_timeout);
+    debug_i("Recv WaitSelect ret=", r);
     if (r <= 0)
         return r;
     if (!AMITCP13_BSD_FD_ISSET(fd, &g_rfds))
         return 0;
     r = call_recv(SocketBase, fd, buf, len, 0);
+    debug_i("Recv ret=", r);
     if (r < 0) {
         err = call_errno(SocketBase);
+        debug_i("Recv errno=", err);
         if (err == AMITCP13_EWOULDBLOCK || err == AMITCP13_EAGAIN)
             return 0;
     }
@@ -447,6 +552,7 @@ static int http_get_small(const char *url, char *out, int out_size)
     if (fd < 0)
         return 0;
     if (!send_http_get(fd, url, g_http_path)) {
+        set_last_error("HTTP send failed");
         call_close_socket(SocketBase, fd);
         return 0;
     }
@@ -470,8 +576,13 @@ static int http_get_small(const char *url, char *out, int out_size)
         }
     }
     out[used] = 0;
+    debug_i("HTTP body bytes=", used);
     call_close_socket(SocketBase, fd);
-    return used > 0;
+    if (used <= 0) {
+        set_last_error("HTTP no data");
+        return 0;
+    }
+    return 1;
 }
 
 static int http_download_file(const char *url, const char *filename)
@@ -555,7 +666,7 @@ static int fetch_random_mod_info(struct AppState *app)
     const char *url;
 
     if (!http_get_small(MAJA_API_URL, g_api_buf, sizeof(g_api_buf))) {
-        set_status(app, "API failed");
+        set_status(app, g_last_error[0] ? g_last_error : "API failed");
         return 0;
     }
     if (!streq_prefix(g_api_buf, "OK")) {
@@ -699,6 +810,8 @@ static int hit(const struct ButtonRect *b, WORD x, WORD y)
 static void do_play(struct AppState *app)
 {
     app->have_mod = 0;
+    g_last_error[0] = 0;
+    debug_reset();
     set_status(app, "Fetching random MOD...");
     redraw(app);
     if (!fetch_random_mod_info(app)) {

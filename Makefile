@@ -6,9 +6,12 @@ BUILD_DIR = build
 TARGET = $(BUILD_DIR)/MajaPlayer
 SOURCES = src/main.c
 
-.PHONY: all clean
+.PHONY: all clean debug
 
 all: $(TARGET)
+
+debug: CFLAGS += -DMAJAPLAYER_DEBUG=1
+debug: $(TARGET)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
