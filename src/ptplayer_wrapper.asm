@@ -13,8 +13,8 @@ _maja_pt_install:
 
 _maja_pt_start:
         movem.l d2-d7/a2-a6,-(sp)
-        move.l  44(sp),a0
-        move.l  48(sp),a1
+        move.l  48(sp),a0
+        move.l  52(sp),a1
         moveq   #0,d0
         lea     $dff000,a6
         jsr     _mt_init
