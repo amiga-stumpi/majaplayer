@@ -1,0 +1,16 @@
+
+AS = phxass Z
+LD = phxlnk KICK1
+
+.phony: all clean
+
+all:	minimod
+
+clean:
+	rm -f minimod *.o
+
+minimod: minimod.o
+	$(LD) $< to $@
+
+minimod.o: minimod.asm ptplayer.asm ptplayer-oscompat.asm
+	$(AS) $<

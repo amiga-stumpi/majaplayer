@@ -1,6 +1,8 @@
 #include <exec/types.h>
 #include <exec/libraries.h>
+#include <exec/memory.h>
 #include <dos/dos.h>
+#include <dos/dosextens.h>
 #include <intuition/intuition.h>
 #include <graphics/gfxbase.h>
 #include <graphics/rastport.h>
@@ -12,7 +14,7 @@
 
 #include "amitcp13/bsdsocket.h"
 
-#define MAJA_VERSION "MajaPlayer v0.2 by Marcel Jaehne (c)2026"
+#define MAJA_VERSION "MajaPlayer v0.3 by Marcel Jaehne (c)2026"
 #define MAJA_API_URL "http://mods.c64.social/api/random.txt"
 #define MAJA_TEMP_FILE "RAM:MajaPlayer.mod"
 #define MAJA_SAVE_FILE "MajaPlayer_saved.mod"
@@ -58,6 +60,10 @@ static struct Amitcp13BsdFdSet g_rfds;
 static struct Amitcp13BsdFdSet g_wfds;
 static struct Amitcp13BsdTimeVal g_timeout;
 static ULONG g_wait_signals;
+
+extern LONG maja_pt_install(void);
+extern void maja_pt_start(APTR module, APTR samples);
+extern void maja_pt_stop(void);
 static LONG g_one;
 static int g_so_error;
 static int g_so_error_len;
@@ -69,6 +75,10 @@ static char g_http_buf[HTTP_BUF_SIZE];
 static char g_api_buf[API_BUF_SIZE];
 static char g_file_buf[1024];
 static char g_last_error[STATUS_SIZE];
+static APTR g_mod_mem;
+static ULONG g_mod_size;
+static int g_player_active;
+static struct FileInfoBlock g_fib;
 
 static int call_socket(struct Library *base, int domain, int type, int protocol)
 {
@@ -718,14 +728,75 @@ static int copy_file(const char *src, const char *dst)
     return r == 0;
 }
 
-static void launch_player(void)
+static void free_loaded_mod(void)
 {
-    Execute((STRPTR)"Run >NIL: MiniMod RAM:MajaPlayer.mod", 0, 0);
+    if (g_mod_mem) {
+        FreeMem(g_mod_mem, g_mod_size);
+        g_mod_mem = 0;
+        g_mod_size = 0;
+    }
 }
 
 static void stop_player(void)
 {
-    Execute((STRPTR)"Break NAME MiniMod", 0, 0);
+    if (g_player_active) {
+        maja_pt_stop();
+        g_player_active = 0;
+    }
+    free_loaded_mod();
+}
+
+static LONG file_size(const char *filename)
+{
+    BPTR lock;
+    LONG size = -1;
+
+    lock = Lock((STRPTR)filename, ACCESS_READ);
+    if (!lock)
+        return -1;
+    if (Examine(lock, &g_fib))
+        size = g_fib.fib_Size;
+    UnLock(lock);
+    return size;
+}
+
+static int load_mod_to_chip(const char *filename)
+{
+    BPTR fh;
+    LONG size;
+    LONG got;
+
+    stop_player();
+    size = file_size(filename);
+    if (size <= 1084)
+        return 0;
+    g_mod_mem = AllocMem((ULONG)size, MEMF_CHIP);
+    if (!g_mod_mem)
+        return 0;
+    g_mod_size = (ULONG)size;
+    fh = Open((STRPTR)filename, MODE_OLDFILE);
+    if (!fh) {
+        free_loaded_mod();
+        return 0;
+    }
+    got = Read(fh, g_mod_mem, size);
+    Close(fh);
+    if (got != size) {
+        free_loaded_mod();
+        return 0;
+    }
+    return 1;
+}
+
+static int launch_player(void)
+{
+    if (!g_mod_mem)
+        return 0;
+    if (!maja_pt_install())
+        return 0;
+    maja_pt_start(g_mod_mem, 0);
+    g_player_active = 1;
+    return 1;
 }
 
 static void layout(struct AppState *app)
@@ -831,9 +902,20 @@ static void do_play(struct AppState *app)
         return;
     }
     app->have_mod = 1;
+    set_status(app, "Loading MOD...");
+    redraw(app);
+    if (!load_mod_to_chip(MAJA_TEMP_FILE)) {
+        set_status(app, "MOD load failed");
+        redraw(app);
+        return;
+    }
+    if (!launch_player()) {
+        set_status(app, "Player init failed");
+        redraw(app);
+        return;
+    }
     set_status(app, "Playing");
     redraw(app);
-    launch_player();
 }
 
 static void do_stop(struct AppState *app)
@@ -968,6 +1050,7 @@ int main(void)
         }
     }
 
+    stop_player();
     CloseWindow(app.win);
     close_libraries();
     return 0;

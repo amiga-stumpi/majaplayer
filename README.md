@@ -5,7 +5,7 @@ mods.c64.social MOD archive service.
 
 Version:
 
-    MajaPlayer v0.2 by Marcel Jaehne (c)2026
+    MajaPlayer v0.3 by Marcel Jaehne (c)2026
 
 ## Scope
 
@@ -22,22 +22,20 @@ Version:
 
 ## GUI
 
-- Play: fetches a random MOD, downloads it, and starts playback through an
-  external MiniMod command if available.
-- Stop: sends a best-effort DOS `Break` command for the external player.
-- Skip: stops the current external player best-effort, fetches another random MOD, and starts it.
+- Play: fetches a random MOD, downloads it, loads it into Chip RAM, and starts embedded ptplayer playback.
+- Stop: stops embedded playback and frees the loaded module memory.
+- Skip: stops the current MOD, fetches another random MOD, and starts it.
 - Download: saves the currently downloaded MOD file.
 - Title line: shows the currently loaded MOD title.
 
-## Playback note
+## Playback
 
-The v0.2 player core is intentionally isolated. It currently expects a
-`MiniMod` executable in the command path and launches it with:
+MajaPlayer embeds the public-domain MiniMod/ptplayer replay code by Harry
+Sintonen and Frank Wille. Playback runs from a CIA timer interrupt, so the
+Workbench GUI remains responsive while music is playing.
 
-    Run >NIL: MiniMod RAM:MajaPlayer.mod
-
-The next step is replacing this wrapper with an embedded OS1.3-safe MOD replay
-core so Stop can control playback directly.
+The current v0.3 loader keeps the complete MOD in Chip RAM for simplicity.
+This is intentionally conservative for the first embedded playback milestone.
 
 ## Build
 
