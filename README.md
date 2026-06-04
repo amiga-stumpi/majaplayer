@@ -5,7 +5,7 @@ mods.c64.social MOD archive service.
 
 Version:
 
-    MajaPlayer v0.6 by Marcel Jaehne (c)2026
+    MajaPlayer v0.7 by Marcel Jaehne (c)2026
 
 ## Scope
 
@@ -17,10 +17,11 @@ Version:
 - Falls back to local random selection from `api/list.txt` and then static `api/random.txt`
 - Downloads the current MOD to:
   - `RAM:MajaPlayer.mod`
-- Optional Save button copies the current MOD to:
-  - `MajaPlayer_saved.mod`
+- Download button saves the current MOD using the current MOD title as filename
 
 ## GUI
+
+The window is dynamically resizable and the controls are recalculated on size changes.
 
 - Play: fetches a random MOD, downloads it, loads it into Chip RAM, and starts embedded ptplayer playback.
 - Stop: stops embedded playback and frees the loaded module memory.
@@ -68,3 +69,7 @@ that are too large for the currently available memory.
 For playback, header and pattern data are allocated with Fast/Slow RAM priority
 (`MEMF_FAST`) and fall back to public memory if needed. Sample data is allocated
 in Chip RAM because Paula must be able to DMA it.
+
+## Saved filenames
+
+The Download button stores `RAM:MajaPlayer.mod` under a filename derived from the current MOD title. Spaces and Amiga path separators are replaced with underscores.

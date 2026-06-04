@@ -14,14 +14,13 @@
 
 #include "amitcp13/bsdsocket.h"
 
-#define MAJA_VERSION "MajaPlayer v0.6 by Marcel Jaehne (c)2026"
+#define MAJA_VERSION "MajaPlayer v0.7 by Marcel Jaehne (c)2026"
 #define MAJA_API_URL "http://mods.c64.social/api/random.php"
 #define MAJA_STATIC_RANDOM_URL "http://mods.c64.social/api/random.txt"
 #define MAJA_LIST_URL "http://mods.c64.social/api/list.txt"
 #define MAJA_TEMP_FILE "RAM:MajaPlayer.mod"
-#define MAJA_SAVE_FILE "MajaPlayer_saved.mod"
 
-#define GUI_MIN_W 260
+#define GUI_MIN_W 336
 #define GUI_MIN_H 68
 #define API_BUF_SIZE 2048
 #define LIST_LINE_SIZE 384
@@ -29,6 +28,7 @@
 #define TITLE_SIZE 96
 #define URL_SIZE 256
 #define STATUS_SIZE 96
+#define SAVE_NAME_SIZE 128
 #define MEMORY_RESERVE_BYTES 65536UL
 #define PTH_ORDERLIST 952
 #define PTH_SIZEOF 1084
@@ -84,6 +84,7 @@ static char g_api_buf[API_BUF_SIZE];
 static char g_list_line[LIST_LINE_SIZE];
 static char g_selected_line[LIST_LINE_SIZE];
 static char g_file_buf[1024];
+static char g_save_name[SAVE_NAME_SIZE];
 static UBYTE g_mod_header[PTH_SIZEOF];
 static char g_last_error[STATUS_SIZE];
 static APTR g_mod_mem;
@@ -1095,7 +1096,8 @@ static void layout(struct AppState *app)
 {
     WORD w = app->win->Width;
     WORD y = 32;
-    WORD bw = 74;
+    WORD small_w = 58;
+    WORD save_w = 88;
     WORD gap = 6;
     WORD x;
 
@@ -1104,27 +1106,26 @@ static void layout(struct AppState *app)
     x = 8;
     app->play.x = x;
     app->play.y = y;
-    app->play.w = bw;
+    app->play.w = small_w;
     app->play.h = 16;
     app->play.label = "Play";
-    x += bw + gap;
+    x += small_w + gap;
     app->stop.x = x;
     app->stop.y = y;
-    app->stop.w = bw;
+    app->stop.w = small_w;
     app->stop.h = 16;
     app->stop.label = "Stop";
-    x += bw + gap;
+    x += small_w + gap;
     app->skip.x = x;
     app->skip.y = y;
-    app->skip.w = bw;
+    app->skip.w = small_w;
     app->skip.h = 16;
     app->skip.label = "Skip";
-    x += bw + gap;
-    app->save.x = x;
+    app->save.w = save_w;
+    app->save.x = w - save_w - 12;
+    if (app->save.x < x + gap)
+        app->save.x = x + gap;
     app->save.y = y;
-    app->save.w = w - x - 8;
-    if (app->save.w < bw)
-        app->save.w = bw;
     app->save.h = 16;
     app->save.label = "Download";
 }
@@ -1230,6 +1231,48 @@ static void do_skip(struct AppState *app)
     do_play(app);
 }
 
+static int safe_filename_char(char c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return 1;
+    if (c >= 'a' && c <= 'z')
+        return 1;
+    if (c >= '0' && c <= '9')
+        return 1;
+    return c == '_' || c == '-' || c == '.';
+}
+
+static void build_save_name(struct AppState *app)
+{
+    int i;
+    int pos = 0;
+    const char *src = app->title;
+
+    if (!src || !src[0])
+        src = "MajaPlayer_saved";
+    for (i = 0; src[i] && pos < SAVE_NAME_SIZE - 5; ++i) {
+        char c = src[i];
+        if (c == ' ' || c == '/' || c == ':' || c == '\\')
+            c = '_';
+        if (!safe_filename_char(c))
+            c = '_';
+        if (c == '_' && pos > 0 && g_save_name[pos - 1] == '_')
+            continue;
+        g_save_name[pos++] = c;
+    }
+    while (pos > 0 && g_save_name[pos - 1] == '_')
+        --pos;
+    if (pos == 0) {
+        str_copy(g_save_name, SAVE_NAME_SIZE, "MajaPlayer_saved.mod");
+        return;
+    }
+    g_save_name[pos++] = '.';
+    g_save_name[pos++] = 'm';
+    g_save_name[pos++] = 'o';
+    g_save_name[pos++] = 'd';
+    g_save_name[pos] = 0;
+}
+
 static void do_save(struct AppState *app)
 {
     if (!app->have_mod) {
@@ -1237,8 +1280,9 @@ static void do_save(struct AppState *app)
         redraw(app);
         return;
     }
-    if (copy_file(MAJA_TEMP_FILE, MAJA_SAVE_FILE))
-        set_status(app, "Saved MajaPlayer_saved.mod");
+    build_save_name(app);
+    if (copy_file(MAJA_TEMP_FILE, g_save_name))
+        set_status(app, "Saved current MOD");
     else
         set_status(app, "Save failed");
     redraw(app);
@@ -1271,7 +1315,7 @@ static int open_app_window(struct AppState *app)
     memset(&nw, 0, sizeof(nw));
     nw.LeftEdge = 24;
     nw.TopEdge = 24;
-    nw.Width = 320;
+    nw.Width = 360;
     nw.Height = 74;
     nw.DetailPen = 0;
     nw.BlockPen = 1;
@@ -1285,8 +1329,8 @@ static int open_app_window(struct AppState *app)
     nw.BitMap = 0;
     nw.MinWidth = GUI_MIN_W;
     nw.MinHeight = GUI_MIN_H;
-    nw.MaxWidth = 640;
-    nw.MaxHeight = 256;
+    nw.MaxWidth = 1000;
+    nw.MaxHeight = 1000;
     nw.Type = WBENCHSCREEN;
 
     app->win = OpenWindow(&nw);
