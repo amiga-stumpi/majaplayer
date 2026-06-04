@@ -11,6 +11,7 @@ Version:
 
 - Kickstart/Workbench 1.3 compatible Intuition window
 - 68000 compatible
+- Network and file transfer buffers are static to avoid small Workbench stack crashes
 - Uses `bsdsocket.library` for HTTP downloads
 - Fetches a random MOD from:
   - `http://mods.c64.social/api/random.txt`

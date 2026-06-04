@@ -54,6 +54,13 @@ static struct Amitcp13BsdFdSet g_rfds;
 static struct Amitcp13BsdFdSet g_wfds;
 static struct Amitcp13BsdTimeVal g_timeout;
 static ULONG g_wait_signals;
+static char g_http_host[80];
+static char g_http_path[256];
+static char g_http_dummy_path[16];
+static char g_http_req[384];
+static char g_http_buf[HTTP_BUF_SIZE];
+static char g_api_buf[API_BUF_SIZE];
+static char g_file_buf[1024];
 
 static int call_socket(struct Library *base, int domain, int type, int protocol)
 {
@@ -279,16 +286,15 @@ static int send_all(struct Library *base, int fd, const char *buf, int len)
 
 static int open_http_socket(const char *url, char *path, int path_size)
 {
-    char host[80];
     UWORD port;
     struct hostent *he;
     int fd;
 
     if (!SocketBase)
         return -1;
-    if (!parse_http_url(url, host, sizeof(host), path, path_size, &port))
+    if (!parse_http_url(url, g_http_host, sizeof(g_http_host), path, path_size, &port))
         return -1;
-    he = call_gethostbyname(SocketBase, host);
+    he = call_gethostbyname(SocketBase, g_http_host);
     if (!he || !he->h_addr_list || !he->h_addr_list[0])
         return -1;
     fd = call_socket(SocketBase, AMITCP13_AF_INET, AMITCP13_SOCK_STREAM, AMITCP13_IPPROTO_TCP);
@@ -308,24 +314,21 @@ static int open_http_socket(const char *url, char *path, int path_size)
 
 static int send_http_get(int fd, const char *host_path_url, const char *path)
 {
-    char host[80];
-    char dummy_path[16];
     UWORD port;
-    char req[384];
     int pos = 0;
 
-    if (!parse_http_url(host_path_url, host, sizeof(host), dummy_path, sizeof(dummy_path), &port))
+    if (!parse_http_url(host_path_url, g_http_host, sizeof(g_http_host), g_http_dummy_path, sizeof(g_http_dummy_path), &port))
         return 0;
     pos = 0;
-#define ADDTXT(t) do { const char *q = (t); while (*q && pos < (int)sizeof(req) - 1) req[pos++] = *q++; } while (0)
+#define ADDTXT(t) do { const char *q = (t); while (*q && pos < (int)sizeof(g_http_req) - 1) g_http_req[pos++] = *q++; } while (0)
     ADDTXT("GET ");
     ADDTXT(path);
     ADDTXT(" HTTP/1.0\r\nHost: ");
-    ADDTXT(host);
+    ADDTXT(g_http_host);
     ADDTXT("\r\nConnection: close\r\n\r\n");
 #undef ADDTXT
-    req[pos] = 0;
-    return send_all(SocketBase, fd, req, pos);
+    g_http_req[pos] = 0;
+    return send_all(SocketBase, fd, g_http_req, pos);
 }
 
 static int find_header_end(char *buf, int len)
@@ -368,8 +371,6 @@ static int recv_wait(int fd, char *buf, int len)
 
 static int http_get_small(const char *url, char *out, int out_size)
 {
-    char path[256];
-    char buf[HTTP_BUF_SIZE];
     int fd;
     int used = 0;
     int header_done = 0;
@@ -377,20 +378,20 @@ static int http_get_small(const char *url, char *out, int out_size)
     int off;
     int copy;
 
-    fd = open_http_socket(url, path, sizeof(path));
+    fd = open_http_socket(url, g_http_path, sizeof(g_http_path));
     if (fd < 0)
         return 0;
-    if (!send_http_get(fd, url, path)) {
+    if (!send_http_get(fd, url, g_http_path)) {
         call_close_socket(SocketBase, fd);
         return 0;
     }
     while (used < out_size - 1) {
-        r = recv_wait(fd, buf, sizeof(buf));
+        r = recv_wait(fd, g_http_buf, sizeof(g_http_buf));
         if (r <= 0)
             break;
         off = 0;
         if (!header_done) {
-            off = find_header_end(buf, r);
+            off = find_header_end(g_http_buf, r);
             if (off < 0)
                 continue;
             header_done = 1;
@@ -399,7 +400,7 @@ static int http_get_small(const char *url, char *out, int out_size)
         if (copy > out_size - 1 - used)
             copy = out_size - 1 - used;
         if (copy > 0) {
-            memcpy(out + used, buf + off, copy);
+            memcpy(out + used, g_http_buf + off, copy);
             used += copy;
         }
     }
@@ -410,18 +411,16 @@ static int http_get_small(const char *url, char *out, int out_size)
 
 static int http_download_file(const char *url, const char *filename)
 {
-    char path[256];
-    char buf[HTTP_BUF_SIZE];
     BPTR fh;
     int fd;
     int header_done = 0;
     int r;
     int off;
 
-    fd = open_http_socket(url, path, sizeof(path));
+    fd = open_http_socket(url, g_http_path, sizeof(g_http_path));
     if (fd < 0)
         return 0;
-    if (!send_http_get(fd, url, path)) {
+    if (!send_http_get(fd, url, g_http_path)) {
         call_close_socket(SocketBase, fd);
         return 0;
     }
@@ -431,7 +430,7 @@ static int http_download_file(const char *url, const char *filename)
         return 0;
     }
     while (1) {
-        r = recv_wait(fd, buf, sizeof(buf));
+        r = recv_wait(fd, g_http_buf, sizeof(g_http_buf));
         if (r == 0)
             break;
         if (r < 0) {
@@ -441,13 +440,13 @@ static int http_download_file(const char *url, const char *filename)
         }
         off = 0;
         if (!header_done) {
-            off = find_header_end(buf, r);
+            off = find_header_end(g_http_buf, r);
             if (off < 0)
                 continue;
             header_done = 1;
         }
         if (r - off > 0) {
-            if (Write(fh, buf + off, r - off) != r - off) {
+            if (Write(fh, g_http_buf + off, r - off) != r - off) {
                 Close(fh);
                 call_close_socket(SocketBase, fd);
                 return 0;
@@ -487,20 +486,19 @@ static void copy_line(char *dst, int dst_size, const char *src)
 
 static int fetch_random_mod_info(struct AppState *app)
 {
-    char api[API_BUF_SIZE];
     const char *title;
     const char *url;
 
-    if (!http_get_small(MAJA_API_URL, api, sizeof(api))) {
+    if (!http_get_small(MAJA_API_URL, g_api_buf, sizeof(g_api_buf))) {
         set_status(app, "API failed");
         return 0;
     }
-    if (!streq_prefix(api, "OK")) {
+    if (!streq_prefix(g_api_buf, "OK")) {
         set_status(app, "API returned error");
         return 0;
     }
-    title = field_value(api, "TITLE");
-    url = field_value(api, "URL");
+    title = field_value(g_api_buf, "TITLE");
+    url = field_value(g_api_buf, "URL");
     if (!url) {
         set_status(app, "API has no URL");
         return 0;
@@ -517,7 +515,6 @@ static int copy_file(const char *src, const char *dst)
 {
     BPTR in;
     BPTR out;
-    char buf[1024];
     LONG r;
 
     in = Open((STRPTR)src, MODE_OLDFILE);
@@ -528,8 +525,8 @@ static int copy_file(const char *src, const char *dst)
         Close(in);
         return 0;
     }
-    while ((r = Read(in, buf, sizeof(buf))) > 0) {
-        if (Write(out, buf, r) != r) {
+    while ((r = Read(in, g_file_buf, sizeof(g_file_buf))) > 0) {
+        if (Write(out, g_file_buf, r) != r) {
             Close(out);
             Close(in);
             return 0;
