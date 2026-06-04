@@ -326,11 +326,6 @@ static void set_status(struct AppState *app, const char *status)
     str_copy(app->status, STATUS_SIZE, status);
 }
 
-static UWORD htons16(UWORD v)
-{
-    return (UWORD)(((v & 0x00ff) << 8) | ((v & 0xff00) >> 8));
-}
-
 static int parse_http_url(const char *url, char *host, int host_size,
                           char *path, int path_size, UWORD *port)
 {
@@ -416,10 +411,19 @@ static int wait_for_connect(struct Library *base, int fd)
     if (call_getsockopt(base, fd, AMITCP13_SOL_SOCKET, AMITCP13_SO_ERROR,
                         &g_so_error, &g_so_error_len) < 0) {
         debug_i("SO_ERROR getsockopt errno=", call_errno(base));
+        set_last_error("Connect check failed");
         return 0;
     }
     debug_i("SO_ERROR value=", g_so_error);
-    return g_so_error == 0;
+    if (g_so_error == 0)
+        return 1;
+    if (g_so_error == AMITCP13_ECONNREFUSED)
+        set_last_error("Connect refused");
+    else if (g_so_error == AMITCP13_ETIMEDOUT)
+        set_last_error("Connect timeout");
+    else
+        set_last_error("Connect error");
+    return 0;
 }
 
 static int open_http_socket(const char *url, char *path, int path_size)
@@ -457,7 +461,7 @@ static int open_http_socket(const char *url, char *path, int path_size)
     memset(&g_addr, 0, sizeof(g_addr));
     g_addr.sin_len = sizeof(g_addr);
     g_addr.sin_family = AMITCP13_AF_INET;
-    g_addr.sin_port = htons16(port);
+    g_addr.sin_port = port;
     g_addr.sin_addr.s_addr = *(ULONG *)he->h_addr_list[0];
     debug_write("Connect start");
     if (call_connect(SocketBase, fd, (const struct Amitcp13BsdSockAddr *)&g_addr, sizeof(g_addr)) < 0) {
@@ -470,7 +474,8 @@ static int open_http_socket(const char *url, char *path, int path_size)
         }
         if (!wait_for_connect(SocketBase, fd)) {
             call_close_socket(SocketBase, fd);
-            set_last_error("Connect timeout");
+            if (!g_last_error[0])
+                set_last_error("Connect timeout");
             return -1;
         }
     }
