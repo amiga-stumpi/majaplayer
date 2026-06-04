@@ -14,7 +14,7 @@
 
 #include "amitcp13/bsdsocket.h"
 
-#define MAJA_VERSION "MajaPlayer v0.9 by Marcel Jaehne (c)2026"
+#define MAJA_VERSION "MajaPlayer v0.10 by Marcel Jaehne (c)2026"
 #define MAJA_API_URL "http://mods.c64.social/api/random.php"
 #define MAJA_STATIC_RANDOM_URL "http://mods.c64.social/api/random.txt"
 #define MAJA_LIST_URL "http://mods.c64.social/api/list.txt"
@@ -29,6 +29,8 @@
 #define URL_SIZE 256
 #define STATUS_SIZE 96
 #define SAVE_NAME_SIZE 128
+#define ARCHIVE_MAX_FILES 64
+#define ARCHIVE_VISIBLE_ROWS 10
 #define MEMORY_RESERVE_BYTES 65536UL
 #define PTH_ORDERLIST 952
 #define PTH_SIZEOF 1084
@@ -56,6 +58,7 @@ struct AppState {
     struct ButtonRect stop;
     struct ButtonRect skip;
     struct ButtonRect save;
+    struct ButtonRect archive;
     struct ButtonRect autoplay_box;
     struct ButtonRect loop_box;
     char title[TITLE_SIZE];
@@ -90,6 +93,8 @@ static char g_list_line[LIST_LINE_SIZE];
 static char g_selected_line[LIST_LINE_SIZE];
 static char g_file_buf[1024];
 static char g_save_name[SAVE_NAME_SIZE];
+static char g_archive_names[ARCHIVE_MAX_FILES][SAVE_NAME_SIZE];
+static struct FileInfoBlock g_archive_fib;
 static UBYTE g_mod_header[PTH_SIZEOF];
 static char g_last_error[STATUS_SIZE];
 static APTR g_mod_mem;
@@ -1133,6 +1138,12 @@ static void layout(struct AppState *app)
     app->save.h = 16;
     app->save.label = "Download";
 
+    app->archive.x = app->save.x;
+    app->archive.y = y + 20;
+    app->archive.w = save_w;
+    app->archive.h = 16;
+    app->archive.label = "Archiv";
+
     app->autoplay_box.x = 8;
     app->autoplay_box.y = y + 20;
     app->autoplay_box.w = 10;
@@ -1202,6 +1213,7 @@ static void redraw(struct AppState *app)
     draw_button(app->win, &app->stop);
     draw_button(app->win, &app->skip);
     draw_button(app->win, &app->save);
+    draw_button(app->win, &app->archive);
     draw_checkbox(app->win, &app->autoplay_box, app->autoplay);
     draw_checkbox(app->win, &app->loop_box, app->loop);
     Move(rp, 8, h - 8);
@@ -1378,6 +1390,182 @@ static void do_save(struct AppState *app)
     redraw(app);
 }
 
+static char ascii_lower(char c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return (char)(c + ('a' - 'A'));
+    return c;
+}
+
+static int is_mod_filename(const char *name)
+{
+    int len = str_len(name);
+
+    if (len < 5)
+        return 0;
+    return name[len - 4] == '.' &&
+           ascii_lower(name[len - 3]) == 'm' &&
+           ascii_lower(name[len - 2]) == 'o' &&
+           ascii_lower(name[len - 1]) == 'd';
+}
+
+static void title_from_filename(char *dst, int dst_size, const char *filename)
+{
+    int i = 0;
+    int len = str_len(filename);
+    int end = len;
+
+    if (len > 4 && is_mod_filename(filename))
+        end = len - 4;
+    while (filename && i < end && i < dst_size - 1) {
+        dst[i] = filename[i];
+        ++i;
+    }
+    dst[i] = 0;
+    if (dst[0] == 0)
+        str_copy(dst, dst_size, "Archived MOD");
+}
+
+static int scan_archive_files(void)
+{
+    struct Process *proc = (struct Process *)FindTask(0);
+    BPTR lock;
+    int count = 0;
+
+    if (!proc)
+        return 0;
+    lock = DupLock(proc->pr_CurrentDir);
+    if (!lock)
+        return 0;
+    if (!Examine(lock, &g_archive_fib)) {
+        UnLock(lock);
+        return 0;
+    }
+    while (count < ARCHIVE_MAX_FILES && ExNext(lock, &g_archive_fib)) {
+        if (g_archive_fib.fib_DirEntryType < 0 && is_mod_filename((const char *)g_archive_fib.fib_FileName)) {
+            str_copy(g_archive_names[count], SAVE_NAME_SIZE, (const char *)g_archive_fib.fib_FileName);
+            ++count;
+        }
+    }
+    UnLock(lock);
+    return count;
+}
+
+static void draw_archive_window(struct Window *win, int count)
+{
+    struct RastPort *rp = win->RPort;
+    int i;
+    int rows = count;
+
+    if (rows > ARCHIVE_VISIBLE_ROWS)
+        rows = ARCHIVE_VISIBLE_ROWS;
+    SetAPen(rp, 0);
+    RectFill(rp, 2, 10, win->Width - 3, win->Height - 3);
+    SetAPen(rp, 1);
+    SetBPen(rp, 0);
+    SetDrMd(rp, JAM1);
+    Move(rp, 8, 22);
+    if (count == 0) {
+        Text(rp, (STRPTR)"No archived MODs", 16);
+        return;
+    }
+    for (i = 0; i < rows; ++i) {
+        Move(rp, 8, (WORD)(24 + i * 10));
+        Text(rp, (STRPTR)g_archive_names[i], str_len(g_archive_names[i]));
+    }
+    if (count > ARCHIVE_VISIBLE_ROWS) {
+        Move(rp, 8, (WORD)(24 + ARCHIVE_VISIBLE_ROWS * 10));
+        Text(rp, (STRPTR)"Only first 10 shown", 19);
+    }
+}
+
+static void play_archive_file(struct AppState *app, const char *filename)
+{
+    set_status(app, "Loading archive...");
+    redraw(app);
+    if (!load_mod_for_player(filename)) {
+        set_status(app, "Archive load failed");
+        redraw(app);
+        return;
+    }
+    if (!launch_player()) {
+        set_status(app, "Player init failed");
+        redraw(app);
+        return;
+    }
+    mt_SongEnd = 0;
+    app->have_mod = 0;
+    title_from_filename(app->title, TITLE_SIZE, filename);
+    set_status(app, "Playing archive");
+    redraw(app);
+}
+
+static void do_archive(struct AppState *app)
+{
+    struct NewWindow nw;
+    struct Window *win;
+    ULONG sigmask;
+    int done = 0;
+    int count;
+    int selected = -1;
+    char selected_name[SAVE_NAME_SIZE];
+
+    selected_name[0] = 0;
+    count = scan_archive_files();
+
+    memset(&nw, 0, sizeof(nw));
+    nw.LeftEdge = app->win->LeftEdge + 16;
+    nw.TopEdge = app->win->TopEdge + 16;
+    nw.Width = 300;
+    nw.Height = 150;
+    nw.DetailPen = 0;
+    nw.BlockPen = 1;
+    nw.IDCMPFlags = IDCMP_CLOSEWINDOW | IDCMP_MOUSEBUTTONS | IDCMP_REFRESHWINDOW;
+    nw.Flags = WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_CLOSEGADGET |
+               WFLG_SMART_REFRESH | WFLG_ACTIVATE;
+    nw.Title = (UBYTE *)"Archiv";
+    nw.Type = WBENCHSCREEN;
+
+    win = OpenWindow(&nw);
+    if (!win) {
+        set_status(app, "Archive window failed");
+        redraw(app);
+        return;
+    }
+    draw_archive_window(win, count);
+    sigmask = 1UL << win->UserPort->mp_SigBit;
+
+    while (!done) {
+        struct IntuiMessage *msg;
+        Wait(sigmask);
+        while ((msg = (struct IntuiMessage *)GetMsg(win->UserPort)) != 0) {
+            ULONG cls = msg->Class;
+            WORD mx = msg->MouseX;
+            WORD my = msg->MouseY;
+            UWORD code = msg->Code;
+            ReplyMsg((struct Message *)msg);
+            if (cls == IDCMP_CLOSEWINDOW) {
+                done = 1;
+            } else if (cls == IDCMP_REFRESHWINDOW) {
+                BeginRefresh(win);
+                draw_archive_window(win, count);
+                EndRefresh(win, TRUE);
+            } else if (cls == IDCMP_MOUSEBUTTONS && code == SELECTDOWN) {
+                if (mx >= 4 && mx < win->Width - 4 && my >= 14) {
+                    selected = (my - 16) / 10;
+                    if (selected >= 0 && selected < count && selected < ARCHIVE_VISIBLE_ROWS) {
+                        str_copy(selected_name, SAVE_NAME_SIZE, g_archive_names[selected]);
+                        done = 1;
+                    }
+                }
+            }
+        }
+    }
+    CloseWindow(win);
+    if (selected_name[0])
+        play_archive_file(app, selected_name);
+}
+
 static int init_libraries(void)
 {
     IntuitionBase = (struct IntuitionBase *)OpenLibrary((STRPTR)"intuition.library", 0);
@@ -1479,6 +1667,8 @@ int main(void)
                     do_skip(&app);
                 else if (hit(&app.save, mx, my))
                     do_save(&app);
+                else if (hit(&app.archive, mx, my))
+                    do_archive(&app);
                 else if (hit_checkbox(&app.autoplay_box, mx, my))
                     toggle_autoplay(&app);
                 else if (hit_checkbox(&app.loop_box, mx, my))

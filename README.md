@@ -5,7 +5,7 @@ mods.c64.social MOD archive service.
 
 Version:
 
-    MajaPlayer v0.9 by Marcel Jaehne (c)2026
+    MajaPlayer v0.10 by Marcel Jaehne (c)2026
 
 ## Scope
 
@@ -27,6 +27,7 @@ The window is dynamically resizable and the controls are recalculated on size ch
 - Stop: stops embedded playback and frees the loaded module memory.
 - Skip: stops the current MOD, chooses another random entry from `list.txt`, downloads it, and starts it.
 - Download: saves the currently downloaded MOD file.
+- Archiv: opens a small archive window with saved `.mod` files from the current directory. Clicking an entry loads and plays it.
 - Autoplay: when enabled, starts a new random download automatically after the current MOD reaches its song end. Enabling Autoplay disables Loop.
 - Loop: when enabled, keeps the current MOD looping. Loop takes precedence over Autoplay.
 - Title line: shows the currently loaded MOD title.
@@ -73,4 +74,4 @@ in Chip RAM because Paula must be able to DMA it.
 
 ## Saved filenames
 
-The Download button stores `RAM:MajaPlayer.mod` under a filename derived from the current MOD title. Spaces and Amiga path separators are replaced with underscores.
+The Download button stores `RAM:MajaPlayer.mod` under a filename derived from the current MOD title. Spaces and Amiga path separators are replaced with underscores. The Archiv button scans the current directory for saved `.mod` files and can play one directly from the list.
