@@ -4,7 +4,7 @@ CFLAGS ?= -O2 -Wall -Wextra -mcrt=nix13 -DAMITCP13_OS13
 INCLUDES = -I/opt/amitcp13/include -I/opt/amiga-netinclude/include
 
 BUILD_DIR = build
-TARGET = $(BUILD_DIR)/MajaPlayer
+TARGET = $(BUILD_DIR)/MajaRadio
 SOURCES = src/main.c
 ASM_OBJECTS = $(BUILD_DIR)/ptplayer_wrapper.o
 

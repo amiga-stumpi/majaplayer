@@ -14,11 +14,11 @@
 
 #include "amitcp13/bsdsocket.h"
 
-#define MAJA_VERSION "MajaPlayer v0.10 by Marcel Jaehne (c)2026"
+#define MAJA_VERSION "MajaRadio v0.10 by Marcel Jaehne (c)2026"
 #define MAJA_API_URL "http://mods.c64.social/api/random.php"
 #define MAJA_STATIC_RANDOM_URL "http://mods.c64.social/api/random.txt"
 #define MAJA_LIST_URL "http://mods.c64.social/api/list.txt"
-#define MAJA_TEMP_FILE "RAM:MajaPlayer.mod"
+#define MAJA_TEMP_FILE "RAM:MajaRadio.mod"
 
 #define GUI_MIN_W 336
 #define GUI_MIN_H 92
@@ -289,9 +289,9 @@ static void debug_write(const char *text)
     BPTR fh;
     if (!text)
         return;
-    fh = Open((STRPTR)"RAM:MajaPlayer_debug.log", MODE_READWRITE);
+    fh = Open((STRPTR)"RAM:MajaRadio_debug.log", MODE_READWRITE);
     if (!fh)
-        fh = Open((STRPTR)"RAM:MajaPlayer_debug.log", MODE_NEWFILE);
+        fh = Open((STRPTR)"RAM:MajaRadio_debug.log", MODE_NEWFILE);
     if (!fh)
         return;
     Seek(fh, 0, OFFSET_END);
@@ -307,9 +307,9 @@ static void debug_reset(void)
 {
 #if MAJAPLAYER_DEBUG
     BPTR fh;
-    fh = Open((STRPTR)"RAM:MajaPlayer_debug.log", MODE_NEWFILE);
+    fh = Open((STRPTR)"RAM:MajaRadio_debug.log", MODE_NEWFILE);
     if (fh) {
-        Write(fh, (APTR)"MajaPlayer debug start\n", 23);
+        Write(fh, (APTR)"MajaRadio debug start\n", 23);
         Close(fh);
     }
 #endif
@@ -1351,7 +1351,7 @@ static void build_save_name(struct AppState *app)
     const char *src = app->title;
 
     if (!src || !src[0])
-        src = "MajaPlayer_saved";
+        src = "MajaRadio_saved";
     for (i = 0; src[i] && pos < SAVE_NAME_SIZE - 5; ++i) {
         char c = src[i];
         if (c == ' ' || c == '/' || c == ':' || c == '\\')
@@ -1365,7 +1365,7 @@ static void build_save_name(struct AppState *app)
     while (pos > 0 && g_save_name[pos - 1] == '_')
         --pos;
     if (pos == 0) {
-        str_copy(g_save_name, SAVE_NAME_SIZE, "MajaPlayer_saved.mod");
+        str_copy(g_save_name, SAVE_NAME_SIZE, "MajaRadio_saved.mod");
         return;
     }
     g_save_name[pos++] = '.';

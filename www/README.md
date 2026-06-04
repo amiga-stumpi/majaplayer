@@ -1,4 +1,4 @@
-# MajaPlayer MOD Server
+# MajaRadio MOD Server
 
 Static HTTP content for an AmigaOS 1.3 friendly MOD download service.
 

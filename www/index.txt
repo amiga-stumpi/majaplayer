@@ -1,4 +1,4 @@
-MajaPlayer MOD Server
+MajaRadio MOD Server
 
 API:
   /api/random.txt  current random MOD metadata

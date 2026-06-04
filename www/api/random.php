@@ -1,5 +1,5 @@
 <?php
-/* MajaPlayer server-side random MOD endpoint. Plain text, Amiga-friendly. */
+/* MajaRadio server-side random MOD endpoint. Plain text, Amiga-friendly. */
 header('Content-Type: text/plain; charset=US-ASCII');
 header('Cache-Control: no-cache, no-store, must-revalidate');
 header('Pragma: no-cache');

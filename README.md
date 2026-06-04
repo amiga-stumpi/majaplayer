@@ -1,11 +1,11 @@
-# MajaPlayer
+# MajaRadio
 
-MajaPlayer is a small AmigaOS 1.3 Workbench MOD player front-end for the
+MajaRadio is a small AmigaOS 1.3 Workbench MOD player front-end for the
 mods.c64.social MOD archive service.
 
 Version:
 
-    MajaPlayer v0.10 by Marcel Jaehne (c)2026
+    MajaRadio v0.10 by Marcel Jaehne (c)2026
 
 ## Scope
 
@@ -16,7 +16,7 @@ Version:
 - Fetches server-side random metadata from `http://mods.c64.social/api/random.php` when available
 - Falls back to local random selection from `api/list.txt` and then static `api/random.txt`
 - Downloads the current MOD to:
-  - `RAM:MajaPlayer.mod`
+  - `RAM:MajaRadio.mod`
 - Download button saves the current MOD using the current MOD title as filename
 
 ## GUI
@@ -34,7 +34,7 @@ The window is dynamically resizable and the controls are recalculated on size ch
 
 ## Playback
 
-MajaPlayer embeds the public-domain MiniMod/ptplayer replay code by Harry
+MajaRadio embeds the public-domain MiniMod/ptplayer replay code by Harry
 Sintonen and Frank Wille. Playback runs from a CIA timer interrupt, so the
 Workbench GUI remains responsive while music is playing.
 
@@ -46,7 +46,7 @@ The loader keeps header and pattern data in Fast/Slow RAM when available, and sa
 
 Output:
 
-    build/MajaPlayer
+    build/MajaRadio
 
 ## Debug build
 
@@ -56,15 +56,15 @@ For API/download troubleshooting:
 
 The debug build writes fetch diagnostics to:
 
-    RAM:MajaPlayer_debug.log
+    RAM:MajaRadio_debug.log
 
 ## Random selection
 
-`api/random.php` performs server-side random selection from `api/list.txt` and returns the same plain text format as `random.txt`. If PHP is not enabled on the web server, MajaPlayer falls back to loading `api/list.txt` and selecting a random module locally on the Amiga.
+`api/random.php` performs server-side random selection from `api/list.txt` and returns the same plain text format as `random.txt`. If PHP is not enabled on the web server, MajaRadio falls back to loading `api/list.txt` and selecting a random module locally on the Amiga.
 
 ## Memory use
 
-On startup MajaPlayer shows available Fast/Slow RAM and Chip RAM in the status
+On startup MajaRadio shows available Fast/Slow RAM and Chip RAM in the status
 line. Before downloading a MOD it checks the advertised `SIZE=` and skips files
 that are too large for the currently available memory.
 
@@ -74,4 +74,4 @@ in Chip RAM because Paula must be able to DMA it.
 
 ## Saved filenames
 
-The Download button stores `RAM:MajaPlayer.mod` under a filename derived from the current MOD title. Spaces and Amiga path separators are replaced with underscores. The Archiv button scans the current directory for saved `.mod` files and can play one directly from the list.
+The Download button stores `RAM:MajaRadio.mod` under a filename derived from the current MOD title. Spaces and Amiga path separators are replaced with underscores. The Archiv button scans the current directory for saved `.mod` files and can play one directly from the list.

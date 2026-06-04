@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Amiga-friendly static API files for the MajaPlayer MOD server."""
+"""Generate Amiga-friendly static API files for the MajaRadio MOD server."""
 
 from __future__ import annotations
 
