@@ -1126,10 +1126,9 @@ static void layout(struct AppState *app)
     app->skip.w = small_w;
     app->skip.h = 16;
     app->skip.label = "Skip";
+    x += small_w + gap;
     app->save.w = save_w;
-    app->save.x = w - save_w - 12;
-    if (app->save.x < x + gap)
-        app->save.x = x + gap;
+    app->save.x = x;
     app->save.y = y;
     app->save.h = 16;
     app->save.label = "Download";
