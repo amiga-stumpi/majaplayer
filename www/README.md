@@ -118,5 +118,6 @@ PATH=...
 URL=...
 ```
 
-This requires PHP support in nginx, usually through php-fpm. If PHP is not
-available, clients can still use `api/list.txt` and choose locally.
+This requires PHP support in nginx through php-fpm. The example nginx config
+uses `fastcgi_pass 127.0.0.1:9000;`. If PHP is not available, clients can
+still use `api/list.txt` and choose locally.
