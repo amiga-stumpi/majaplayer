@@ -14,7 +14,7 @@
 
 #include "amitcp13/bsdsocket.h"
 
-#define MAJA_VERSION "MajaPlayer v0.5 by Marcel Jaehne (c)2026"
+#define MAJA_VERSION "MajaPlayer v0.6 by Marcel Jaehne (c)2026"
 #define MAJA_API_URL "http://mods.c64.social/api/random.php"
 #define MAJA_STATIC_RANDOM_URL "http://mods.c64.social/api/random.txt"
 #define MAJA_LIST_URL "http://mods.c64.social/api/list.txt"
@@ -29,6 +29,10 @@
 #define TITLE_SIZE 96
 #define URL_SIZE 256
 #define STATUS_SIZE 96
+#define MEMORY_RESERVE_BYTES 65536UL
+#define PTH_ORDERLIST 952
+#define PTH_SIZEOF 1084
+#define PATTERN_SIZE 1024
 
 #ifndef MAJAPLAYER_DEBUG
 #define MAJAPLAYER_DEBUG 0
@@ -55,6 +59,7 @@ struct AppState {
     char title[TITLE_SIZE];
     char url[URL_SIZE];
     char status[STATUS_SIZE];
+    ULONG mod_size;
     int have_mod;
 };
 
@@ -79,9 +84,12 @@ static char g_api_buf[API_BUF_SIZE];
 static char g_list_line[LIST_LINE_SIZE];
 static char g_selected_line[LIST_LINE_SIZE];
 static char g_file_buf[1024];
+static UBYTE g_mod_header[PTH_SIZEOF];
 static char g_last_error[STATUS_SIZE];
 static APTR g_mod_mem;
+static APTR g_sample_mem;
 static ULONG g_mod_size;
+static ULONG g_sample_size;
 static int g_player_active;
 static struct FileInfoBlock g_fib;
 static ULONG g_rand_state;
@@ -340,6 +348,62 @@ static void set_last_error(const char *status)
 static void set_status(struct AppState *app, const char *status)
 {
     str_copy(app->status, STATUS_SIZE, status);
+}
+
+static ULONG parse_ulong_value(const char *s)
+{
+    ULONG value = 0;
+
+    if (!s)
+        return 0;
+    while (*s >= '0' && *s <= '9') {
+        value = value * 10UL + (ULONG)(*s - '0');
+        ++s;
+    }
+    return value;
+}
+
+static void append_number(char *dst, int dst_size, ULONG value)
+{
+    char tmp[12];
+    int i = 0;
+    int pos;
+
+    pos = str_len(dst);
+    do {
+        tmp[i++] = (char)('0' + (value % 10UL));
+        value /= 10UL;
+    } while (value && i < (int)sizeof(tmp));
+    while (i > 0 && pos < dst_size - 1)
+        dst[pos++] = tmp[--i];
+    dst[pos] = 0;
+}
+
+static void build_memory_status(char *dst, int dst_size)
+{
+    ULONG fast_k = AvailMem(MEMF_FAST) / 1024UL;
+    ULONG chip_k = AvailMem(MEMF_CHIP) / 1024UL;
+
+    str_copy(dst, dst_size, "Ready Fast ");
+    append_number(dst, dst_size, fast_k);
+    str_copy(dst + str_len(dst), dst_size - str_len(dst), "K Chip ");
+    append_number(dst, dst_size, chip_k);
+    str_copy(dst + str_len(dst), dst_size - str_len(dst), "K");
+}
+
+static int module_size_allowed(ULONG size)
+{
+    ULONG public_avail;
+
+    if (size == 0)
+        return 1;
+    public_avail = AvailMem(MEMF_PUBLIC);
+    if (public_avail <= MEMORY_RESERVE_BYTES)
+        return 0;
+    /* RAM: download plus split player allocation coexist briefly. */
+    if (size > (public_avail - MEMORY_RESERVE_BYTES) / 2UL)
+        return 0;
+    return 1;
 }
 
 static int parse_http_url(const char *url, char *host, int host_size,
@@ -698,9 +762,10 @@ static ULONG next_random(void)
     return g_rand_state;
 }
 
-static int parse_list_line(char *line, char *title, int title_size, char *url, int url_size)
+static int parse_list_line(char *line, char *title, int title_size, char *url, int url_size, ULONG *size_out)
 {
     char *p;
+    char *size_src;
     char *path;
     char *title_src;
     int pos;
@@ -713,11 +778,14 @@ static int parse_list_line(char *line, char *title, int title_size, char *url, i
     if (*p != '|')
         return 0;
     ++p;
+    size_src = p;
     while (*p && *p != '|')
         ++p;
     if (*p != '|')
         return 0;
-    ++p;
+    *p++ = 0;
+    if (size_out)
+        *size_out = parse_ulong_value(size_src);
     path = p;
     while (*p && *p != '|')
         ++p;
@@ -749,7 +817,7 @@ static int consider_list_line(char *line, ULONG *count)
     char url[URL_SIZE];
 
     str_copy(tmp, sizeof(tmp), line);
-    if (!parse_list_line(tmp, title, sizeof(title), url, sizeof(url)))
+    if (!parse_list_line(tmp, title, sizeof(title), url, sizeof(url), 0))
         return 0;
     ++(*count);
     if ((next_random() % *count) == 0)
@@ -816,7 +884,7 @@ static int fetch_random_mod_from_list(struct AppState *app)
         set_last_error("LIST empty");
         return 0;
     }
-    if (!parse_list_line(g_selected_line, app->title, TITLE_SIZE, app->url, URL_SIZE)) {
+    if (!parse_list_line(g_selected_line, app->title, TITLE_SIZE, app->url, URL_SIZE, &app->mod_size)) {
         set_last_error("LIST parse failed");
         return 0;
     }
@@ -827,6 +895,7 @@ static int fetch_random_mod_from_list(struct AppState *app)
 static int parse_random_api_response(struct AppState *app)
 {
     const char *title;
+    const char *size;
     const char *url;
 
     if (!streq_prefix(g_api_buf, "OK")) {
@@ -834,6 +903,8 @@ static int parse_random_api_response(struct AppState *app)
         return 0;
     }
     title = field_value(g_api_buf, "TITLE");
+    size = field_value(g_api_buf, "SIZE");
+    app->mod_size = parse_ulong_value(size);
     url = field_value(g_api_buf, "URL");
     if (!url) {
         set_status(app, "API has no URL");
@@ -900,6 +971,11 @@ static void free_loaded_mod(void)
         g_mod_mem = 0;
         g_mod_size = 0;
     }
+    if (g_sample_mem) {
+        FreeMem(g_sample_mem, g_sample_size);
+        g_sample_mem = 0;
+        g_sample_size = 0;
+    }
 }
 
 static void stop_player(void)
@@ -925,28 +1001,79 @@ static LONG file_size(const char *filename)
     return size;
 }
 
-static int load_mod_to_chip(const char *filename)
+static int load_mod_for_player(const char *filename)
 {
     BPTR fh;
     LONG size;
     LONG got;
+    UBYTE *h;
+    int i;
+    UBYTE max_pattern = 0;
+    ULONG header_pattern_size;
+    ULONG sample_size;
 
     stop_player();
     size = file_size(filename);
-    if (size <= 1084)
+    if (size <= PTH_SIZEOF)
         return 0;
-    g_mod_mem = AllocMem((ULONG)size, MEMF_CHIP);
-    if (!g_mod_mem)
-        return 0;
-    g_mod_size = (ULONG)size;
+
     fh = Open((STRPTR)filename, MODE_OLDFILE);
-    if (!fh) {
+    if (!fh)
+        return 0;
+    got = Read(fh, g_mod_header, PTH_SIZEOF);
+    if (got != PTH_SIZEOF) {
+        Close(fh);
+        return 0;
+    }
+
+    for (i = 0; i < 128; ++i) {
+        if (g_mod_header[PTH_ORDERLIST + i] > max_pattern)
+            max_pattern = g_mod_header[PTH_ORDERLIST + i];
+    }
+    header_pattern_size = (ULONG)PTH_SIZEOF + ((ULONG)max_pattern + 1UL) * (ULONG)PATTERN_SIZE;
+    if (header_pattern_size >= (ULONG)size) {
+        Close(fh);
+        return 0;
+    }
+    sample_size = (ULONG)size - header_pattern_size;
+
+    if (AvailMem(MEMF_PUBLIC) <= header_pattern_size + MEMORY_RESERVE_BYTES) {
+        Close(fh);
+        return 0;
+    }
+    if (AvailMem(MEMF_CHIP) <= sample_size + MEMORY_RESERVE_BYTES / 2UL) {
+        Close(fh);
+        return 0;
+    }
+
+    g_mod_mem = AllocMem(header_pattern_size, MEMF_FAST);
+    if (!g_mod_mem)
+        g_mod_mem = AllocMem(header_pattern_size, MEMF_PUBLIC);
+    if (!g_mod_mem) {
+        Close(fh);
+        return 0;
+    }
+    g_mod_size = header_pattern_size;
+    g_sample_mem = AllocMem(sample_size, MEMF_CHIP);
+    if (!g_sample_mem) {
+        Close(fh);
         free_loaded_mod();
         return 0;
     }
-    got = Read(fh, g_mod_mem, size);
+    g_sample_size = sample_size;
+
+    h = (UBYTE *)g_mod_mem;
+    for (i = 0; i < PTH_SIZEOF; ++i)
+        h[i] = g_mod_header[i];
+    got = Read(fh, h + PTH_SIZEOF, header_pattern_size - PTH_SIZEOF);
+    if (got != (LONG)(header_pattern_size - PTH_SIZEOF)) {
+        Close(fh);
+        free_loaded_mod();
+        return 0;
+    }
+    got = Read(fh, g_sample_mem, sample_size);
     Close(fh);
-    if (got != size) {
+    if (got != (LONG)sample_size) {
         free_loaded_mod();
         return 0;
     }
@@ -959,7 +1086,7 @@ static int launch_player(void)
         return 0;
     if (!maja_pt_install())
         return 0;
-    maja_pt_start(g_mod_mem, 0);
+    maja_pt_start(g_mod_mem, g_sample_mem);
     g_player_active = 1;
     return 1;
 }
@@ -1059,6 +1186,11 @@ static void do_play(struct AppState *app)
         redraw(app);
         return;
     }
+    if (!module_size_allowed(app->mod_size)) {
+        set_status(app, "MOD too large");
+        redraw(app);
+        return;
+    }
     set_status(app, "Downloading MOD...");
     redraw(app);
     if (!http_download_file(app->url, MAJA_TEMP_FILE)) {
@@ -1069,7 +1201,7 @@ static void do_play(struct AppState *app)
     app->have_mod = 1;
     set_status(app, "Loading MOD...");
     redraw(app);
-    if (!load_mod_to_chip(MAJA_TEMP_FILE)) {
+    if (!load_mod_for_player(MAJA_TEMP_FILE)) {
         set_status(app, "MOD load failed");
         redraw(app);
         return;
@@ -1169,7 +1301,7 @@ int main(void)
 
     memset(&app, 0, sizeof(app));
     str_copy(app.title, TITLE_SIZE, "No module loaded");
-    str_copy(app.status, STATUS_SIZE, "Ready");
+    build_memory_status(app.status, STATUS_SIZE);
 
     if (!init_libraries()) {
         close_libraries();

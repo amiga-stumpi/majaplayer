@@ -5,7 +5,7 @@ mods.c64.social MOD archive service.
 
 Version:
 
-    MajaPlayer v0.5 by Marcel Jaehne (c)2026
+    MajaPlayer v0.6 by Marcel Jaehne (c)2026
 
 ## Scope
 
@@ -58,3 +58,13 @@ The debug build writes fetch diagnostics to:
 ## Random selection
 
 `api/random.php` performs server-side random selection from `api/list.txt` and returns the same plain text format as `random.txt`. If PHP is not enabled on the web server, MajaPlayer falls back to loading `api/list.txt` and selecting a random module locally on the Amiga.
+
+## Memory use
+
+On startup MajaPlayer shows available Fast/Slow RAM and Chip RAM in the status
+line. Before downloading a MOD it checks the advertised `SIZE=` and skips files
+that are too large for the currently available memory.
+
+For playback, header and pattern data are allocated with Fast/Slow RAM priority
+(`MEMF_FAST`) and fall back to public memory if needed. Sample data is allocated
+in Chip RAM because Paula must be able to DMA it.
