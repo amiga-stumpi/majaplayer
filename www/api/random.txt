@@ -1,0 +1,2 @@
+ERROR
+MESSAGE=No MOD files indexed yet

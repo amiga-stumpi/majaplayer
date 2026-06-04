@@ -1,0 +1,10 @@
+MajaPlayer MOD Server
+
+API:
+  /api/random.txt  current random MOD metadata
+  /api/list.txt    full MOD list
+
+MOD files:
+  /mods/<file>.mod
+
+This service is intentionally plain HTTP and plain text for AmigaOS 1.3 clients.
