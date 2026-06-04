@@ -30,6 +30,6 @@ _maja_pt_stop:
         movem.l (sp)+,d2-d7/a2-a6
         rts
 
-MINIMAL         EQU     1
+MINIMAL         EQU     0
 OSCOMPAT        EQU     1
         include "../thirdparty/minimod/ptplayer.asm"
