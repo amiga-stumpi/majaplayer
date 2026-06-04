@@ -14,14 +14,16 @@
 
 #include "amitcp13/bsdsocket.h"
 
-#define MAJA_VERSION "MajaPlayer v0.3 by Marcel Jaehne (c)2026"
+#define MAJA_VERSION "MajaPlayer v0.4 by Marcel Jaehne (c)2026"
 #define MAJA_API_URL "http://mods.c64.social/api/random.txt"
+#define MAJA_LIST_URL "http://mods.c64.social/api/list.txt"
 #define MAJA_TEMP_FILE "RAM:MajaPlayer.mod"
 #define MAJA_SAVE_FILE "MajaPlayer_saved.mod"
 
 #define GUI_MIN_W 260
 #define GUI_MIN_H 68
 #define API_BUF_SIZE 2048
+#define LIST_LINE_SIZE 384
 #define HTTP_BUF_SIZE 2048
 #define TITLE_SIZE 96
 #define URL_SIZE 256
@@ -73,12 +75,15 @@ static char g_http_dummy_path[16];
 static char g_http_req[384];
 static char g_http_buf[HTTP_BUF_SIZE];
 static char g_api_buf[API_BUF_SIZE];
+static char g_list_line[LIST_LINE_SIZE];
+static char g_selected_line[LIST_LINE_SIZE];
 static char g_file_buf[1024];
 static char g_last_error[STATUS_SIZE];
 static APTR g_mod_mem;
 static ULONG g_mod_size;
 static int g_player_active;
 static struct FileInfoBlock g_fib;
+static ULONG g_rand_state;
 
 static int call_socket(struct Library *base, int domain, int type, int protocol)
 {
@@ -675,11 +680,158 @@ static void copy_line(char *dst, int dst_size, const char *src)
     dst[i] = 0;
 }
 
+static ULONG next_random(void)
+{
+    struct DateStamp ds;
+
+    if (!g_rand_state) {
+        DateStamp(&ds);
+        g_rand_state = ((ULONG)ds.ds_Days << 16) ^
+                       ((ULONG)ds.ds_Minute << 4) ^
+                       (ULONG)ds.ds_Tick ^
+                       (ULONG)(APTR)&ds;
+        if (!g_rand_state)
+            g_rand_state = 0x13572468UL;
+    }
+    g_rand_state = g_rand_state * 1103515245UL + 12345UL;
+    return g_rand_state;
+}
+
+static int parse_list_line(char *line, char *title, int title_size, char *url, int url_size)
+{
+    char *p;
+    char *path;
+    char *title_src;
+    int pos;
+
+    if (!line || line[0] == '#' || line[0] == 0)
+        return 0;
+    p = line;
+    while (*p && *p != '|')
+        ++p;
+    if (*p != '|')
+        return 0;
+    ++p;
+    while (*p && *p != '|')
+        ++p;
+    if (*p != '|')
+        return 0;
+    ++p;
+    path = p;
+    while (*p && *p != '|')
+        ++p;
+    if (*p != '|')
+        return 0;
+    *p++ = 0;
+    title_src = p;
+    copy_line(title, title_size, title_src);
+    if (title[0] == 0)
+        str_copy(title, title_size, "Unknown MOD");
+
+    pos = 0;
+#define ADDURL(t) do { const char *q = (t); while (*q && pos < url_size - 1) url[pos++] = *q++; } while (0)
+    if (streq_prefix(path, "http://"))
+        ADDURL(path);
+    else {
+        ADDURL("http://mods.c64.social");
+        ADDURL(path);
+    }
+#undef ADDURL
+    url[pos] = 0;
+    return url[0] != 0;
+}
+
+static int consider_list_line(char *line, ULONG *count)
+{
+    char tmp[LIST_LINE_SIZE];
+    char title[TITLE_SIZE];
+    char url[URL_SIZE];
+
+    str_copy(tmp, sizeof(tmp), line);
+    if (!parse_list_line(tmp, title, sizeof(title), url, sizeof(url)))
+        return 0;
+    ++(*count);
+    if ((next_random() % *count) == 0)
+        str_copy(g_selected_line, sizeof(g_selected_line), line);
+    return 1;
+}
+
+static int fetch_random_mod_from_list(struct AppState *app)
+{
+    int fd;
+    int header_done = 0;
+    int r;
+    int off;
+    int i;
+    int line_pos = 0;
+    ULONG count = 0;
+
+    g_selected_line[0] = 0;
+    debug_write("LIST fetch start");
+    fd = open_http_socket(MAJA_LIST_URL, g_http_path, sizeof(g_http_path));
+    if (fd < 0)
+        return 0;
+    if (!send_http_get(fd, MAJA_LIST_URL, g_http_path)) {
+        set_last_error("LIST send failed");
+        call_close_socket(SocketBase, fd);
+        return 0;
+    }
+    while (1) {
+        r = recv_wait(fd, g_http_buf, sizeof(g_http_buf));
+        if (r == 0)
+            break;
+        if (r < 0) {
+            call_close_socket(SocketBase, fd);
+            set_last_error("LIST recv failed");
+            return 0;
+        }
+        off = 0;
+        if (!header_done) {
+            off = find_header_end(g_http_buf, r);
+            if (off < 0)
+                continue;
+            header_done = 1;
+        }
+        for (i = off; i < r; ++i) {
+            char c = g_http_buf[i];
+            if (c == '\r')
+                continue;
+            if (c == '\n') {
+                g_list_line[line_pos] = 0;
+                consider_list_line(g_list_line, &count);
+                line_pos = 0;
+            } else if (line_pos < LIST_LINE_SIZE - 1) {
+                g_list_line[line_pos++] = c;
+            }
+        }
+    }
+    if (line_pos > 0) {
+        g_list_line[line_pos] = 0;
+        consider_list_line(g_list_line, &count);
+    }
+    call_close_socket(SocketBase, fd);
+    debug_i("LIST entries=", (int)count);
+    if (!header_done || count == 0 || !g_selected_line[0]) {
+        set_last_error("LIST empty");
+        return 0;
+    }
+    if (!parse_list_line(g_selected_line, app->title, TITLE_SIZE, app->url, URL_SIZE)) {
+        set_last_error("LIST parse failed");
+        return 0;
+    }
+    debug_write("LIST selected");
+    return 1;
+}
+
 static int fetch_random_mod_info(struct AppState *app)
 {
     const char *title;
     const char *url;
 
+    if (fetch_random_mod_from_list(app))
+        return 1;
+
+    debug_write("LIST failed, fallback random.txt");
     if (!http_get_small(MAJA_API_URL, g_api_buf, sizeof(g_api_buf))) {
         set_status(app, g_last_error[0] ? g_last_error : "API failed");
         return 0;
