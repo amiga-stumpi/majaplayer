@@ -30,6 +30,7 @@ The window is dynamically resizable and the controls are recalculated on size ch
 - Archiv: opens a small archive window with saved `.mod` files from the current directory. Clicking an entry loads and plays it.
 - Autoplay: when enabled, starts a new random download automatically after the current MOD reaches its song end. Enabling Autoplay disables Loop.
 - Loop: when enabled, keeps the current MOD looping. Loop takes precedence over Autoplay.
+- Project -> Info: opens the MajaRadio information dialog.
 - Title line: shows the currently loaded MOD title.
 
 ## Playback

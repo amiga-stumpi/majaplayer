@@ -14,6 +14,8 @@
 
 #include "amitcp13/bsdsocket.h"
 
+#define MAJA_WINDOW_TITLE "MajaRadio v0.10"
+#define MAJA_INFO_VERSION "v0.10"
 #define MAJA_VERSION "MajaRadio v0.10 by Marcel Jaehne (c)2026"
 #define MAJA_API_URL "http://mods.c64.social/api/random.php"
 #define MAJA_STATIC_RANDOM_URL "http://mods.c64.social/api/random.txt"
@@ -104,6 +106,16 @@ static ULONG g_sample_size;
 static int g_player_active;
 static struct FileInfoBlock g_fib;
 static ULONG g_rand_state;
+
+static struct IntuiText g_menu_info_text = { 0, 1, JAM2, 6, 1, 0, (UBYTE *)"Info", 0 };
+static struct MenuItem g_project_info_item = {
+    0, 0, 0, 88, 10, ITEMTEXT | ITEMENABLED | HIGHCOMP, 0,
+    (APTR)&g_menu_info_text, 0, 0, 0, MENUNULL
+};
+static struct Menu g_project_menu = {
+    0, 0, 0, 62, 10, MENUENABLED, (CONST_STRPTR)"Project", &g_project_info_item,
+    0, 0, 0, 0
+};
 
 static int call_socket(struct Library *base, int domain, int type, int protocol)
 {
@@ -1500,6 +1512,98 @@ static void play_archive_file(struct AppState *app, const char *filename)
     redraw(app);
 }
 
+static void draw_info_window(struct Window *win)
+{
+    struct RastPort *rp = win->RPort;
+    struct ButtonRect ok;
+
+    SetAPen(rp, 0);
+    RectFill(rp, 2, 10, win->Width - 3, win->Height - 3);
+    SetAPen(rp, 1);
+    SetBPen(rp, 0);
+    SetDrMd(rp, JAM1);
+    Move(rp, 12, 24);
+    Text(rp, (STRPTR)"MajaRadio for Kick1.3", 22);
+    Move(rp, 12, 38);
+    Text(rp, (STRPTR)"Version: ", 9);
+    Text(rp, (STRPTR)MAJA_INFO_VERSION, str_len(MAJA_INFO_VERSION));
+    Move(rp, 12, 52);
+    Text(rp, (STRPTR)"by Marcel Jaehne", 16);
+    Move(rp, 12, 66);
+    Text(rp, (STRPTR)"(c) 2026", 8);
+    Move(rp, 12, 84);
+    Text(rp, (STRPTR)"If you want to buy me a coffe,", 34);
+    Move(rp, 12, 98);
+    Text(rp, (STRPTR)"send me a buck to:", 18);
+    Move(rp, 12, 112);
+    Text(rp, (STRPTR)"https://paypal.me/mytubefree", 29);
+    ok.x = 129;
+    ok.y = 132;
+    ok.w = 42;
+    ok.h = 14;
+    ok.label = "OK";
+    draw_button(win, &ok);
+}
+
+static void do_info(struct AppState *app)
+{
+    struct NewWindow nw;
+    struct Window *win;
+    ULONG sigmask;
+    int done = 0;
+    struct ButtonRect ok;
+
+    memset(&nw, 0, sizeof(nw));
+    nw.LeftEdge = app->win->LeftEdge + 20;
+    nw.TopEdge = app->win->TopEdge + 20;
+    nw.Width = 300;
+    nw.Height = 160;
+    nw.DetailPen = 0;
+    nw.BlockPen = 1;
+    nw.IDCMPFlags = IDCMP_CLOSEWINDOW | IDCMP_MOUSEBUTTONS | IDCMP_REFRESHWINDOW;
+    nw.Flags = WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_CLOSEGADGET |
+               WFLG_SMART_REFRESH | WFLG_ACTIVATE;
+    nw.Title = (UBYTE *)"Info";
+    nw.Type = WBENCHSCREEN;
+
+    win = OpenWindow(&nw);
+    if (!win) {
+        set_status(app, "Info window failed");
+        redraw(app);
+        return;
+    }
+    ok.x = 129;
+    ok.y = 132;
+    ok.w = 42;
+    ok.h = 14;
+    ok.label = "OK";
+    draw_info_window(win);
+    sigmask = 1UL << win->UserPort->mp_SigBit;
+
+    while (!done) {
+        struct IntuiMessage *msg;
+        Wait(sigmask);
+        while ((msg = (struct IntuiMessage *)GetMsg(win->UserPort)) != 0) {
+            ULONG cls = msg->Class;
+            WORD mx = msg->MouseX;
+            WORD my = msg->MouseY;
+            UWORD code = msg->Code;
+            ReplyMsg((struct Message *)msg);
+            if (cls == IDCMP_CLOSEWINDOW) {
+                done = 1;
+            } else if (cls == IDCMP_REFRESHWINDOW) {
+                BeginRefresh(win);
+                draw_info_window(win);
+                EndRefresh(win, TRUE);
+            } else if (cls == IDCMP_MOUSEBUTTONS && code == SELECTDOWN) {
+                if (hit(&ok, mx, my))
+                    done = 1;
+            }
+        }
+    }
+    CloseWindow(win);
+}
+
 static void do_archive(struct AppState *app)
 {
     struct NewWindow nw;
@@ -1597,12 +1701,12 @@ static int open_app_window(struct AppState *app)
     nw.Height = 96;
     nw.DetailPen = 0;
     nw.BlockPen = 1;
-    nw.IDCMPFlags = IDCMP_CLOSEWINDOW | IDCMP_MOUSEBUTTONS | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE | IDCMP_INTUITICKS;
+    nw.IDCMPFlags = IDCMP_CLOSEWINDOW | IDCMP_MOUSEBUTTONS | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE | IDCMP_INTUITICKS | IDCMP_MENUPICK;
     nw.Flags = WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_CLOSEGADGET |
                WFLG_SIZEGADGET | WFLG_SMART_REFRESH | WFLG_ACTIVATE;
     nw.FirstGadget = 0;
     nw.CheckMark = 0;
-    nw.Title = (UBYTE *)MAJA_VERSION;
+    nw.Title = (UBYTE *)MAJA_WINDOW_TITLE;
     nw.Screen = 0;
     nw.BitMap = 0;
     nw.MinWidth = GUI_MIN_W;
@@ -1635,6 +1739,7 @@ int main(void)
     }
     layout(&app);
     redraw(&app);
+    SetMenuStrip(app.win, &g_project_menu);
     sigmask = 1UL << app.win->UserPort->mp_SigBit;
 
     while (!done) {
@@ -1658,6 +1763,9 @@ int main(void)
                 redraw(&app);
             } else if (cls == IDCMP_INTUITICKS) {
                 check_playback_end(&app);
+            } else if (cls == IDCMP_MENUPICK) {
+                if (code != MENUNULL && MENUNUM(code) == 0 && ITEMNUM(code) == 0)
+                    do_info(&app);
             } else if (cls == IDCMP_MOUSEBUTTONS && code == SELECTDOWN) {
                 if (hit(&app.play, mx, my))
                     do_play(&app);
@@ -1678,6 +1786,7 @@ int main(void)
     }
 
     stop_player();
+    ClearMenuStrip(app.win);
     CloseWindow(app.win);
     close_libraries();
     return 0;
