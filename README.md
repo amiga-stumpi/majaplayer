@@ -5,7 +5,7 @@ mods.c64.social MOD archive service.
 
 Version:
 
-    MajaPlayer v0.8 by Marcel Jaehne (c)2026
+    MajaPlayer v0.9 by Marcel Jaehne (c)2026
 
 ## Scope
 
@@ -27,7 +27,8 @@ The window is dynamically resizable and the controls are recalculated on size ch
 - Stop: stops embedded playback and frees the loaded module memory.
 - Skip: stops the current MOD, chooses another random entry from `list.txt`, downloads it, and starts it.
 - Download: saves the currently downloaded MOD file.
-- Autoplay: when enabled, starts a new random download automatically after the current MOD reaches its song end.
+- Autoplay: when enabled, starts a new random download automatically after the current MOD reaches its song end. Enabling Autoplay disables Loop.
+- Loop: when enabled, keeps the current MOD looping. Loop takes precedence over Autoplay.
 - Title line: shows the currently loaded MOD title.
 
 ## Playback
@@ -36,7 +37,7 @@ MajaPlayer embeds the public-domain MiniMod/ptplayer replay code by Harry
 Sintonen and Frank Wille. Playback runs from a CIA timer interrupt, so the
 Workbench GUI remains responsive while music is playing.
 
-The loader keeps header and pattern data in Fast/Slow RAM when available, and sample data in Chip RAM for Paula DMA. Autoplay uses the embedded ptplayer song-end flag and does not depend on a fixed playback timeout.
+The loader keeps header and pattern data in Fast/Slow RAM when available, and sample data in Chip RAM for Paula DMA. Autoplay and Loop use the embedded ptplayer song-end flag and do not depend on fixed playback timeouts. If neither mode is enabled, playback stops when the song reaches its end.
 
 ## Build
 

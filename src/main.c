@@ -14,7 +14,7 @@
 
 #include "amitcp13/bsdsocket.h"
 
-#define MAJA_VERSION "MajaPlayer v0.8 by Marcel Jaehne (c)2026"
+#define MAJA_VERSION "MajaPlayer v0.9 by Marcel Jaehne (c)2026"
 #define MAJA_API_URL "http://mods.c64.social/api/random.php"
 #define MAJA_STATIC_RANDOM_URL "http://mods.c64.social/api/random.txt"
 #define MAJA_LIST_URL "http://mods.c64.social/api/list.txt"
@@ -57,12 +57,14 @@ struct AppState {
     struct ButtonRect skip;
     struct ButtonRect save;
     struct ButtonRect autoplay_box;
+    struct ButtonRect loop_box;
     char title[TITLE_SIZE];
     char url[URL_SIZE];
     char status[STATUS_SIZE];
     ULONG mod_size;
     int have_mod;
     int autoplay;
+    int loop;
 };
 
 static struct Amitcp13BsdSockAddrIn g_addr;
@@ -1137,6 +1139,12 @@ static void layout(struct AppState *app)
     app->autoplay_box.w = 10;
     app->autoplay_box.h = 10;
     app->autoplay_box.label = "Autoplay";
+
+    app->loop_box.x = 104;
+    app->loop_box.y = y + 20;
+    app->loop_box.w = 10;
+    app->loop_box.h = 10;
+    app->loop_box.label = "Loop";
 }
 
 static void draw_button(struct Window *win, const struct ButtonRect *b)
@@ -1196,6 +1204,7 @@ static void redraw(struct AppState *app)
     draw_button(app->win, &app->skip);
     draw_button(app->win, &app->save);
     draw_checkbox(app->win, &app->autoplay_box, app->autoplay);
+    draw_checkbox(app->win, &app->loop_box, app->loop);
     Move(rp, 8, h - 8);
     Text(rp, (STRPTR)app->status, str_len(app->status));
 }
@@ -1268,25 +1277,48 @@ static void do_skip(struct AppState *app)
     do_play(app);
 }
 
-static void check_autoplay(struct AppState *app)
+static void check_playback_end(struct AppState *app)
 {
-    if (!app->autoplay || !g_player_active)
+    if (!g_player_active || mt_SongEnd == 0)
         return;
-    if (mt_SongEnd == 0)
+    if (app->loop) {
+        mt_SongEnd = 0;
         return;
+    }
+    if (app->autoplay) {
+        stop_player();
+        set_status(app, "Autoplay next...");
+        redraw(app);
+        do_play(app);
+        return;
+    }
     stop_player();
-    set_status(app, "Autoplay next...");
+    set_status(app, "Finished");
     redraw(app);
-    do_play(app);
 }
 
 static void toggle_autoplay(struct AppState *app)
 {
     app->autoplay = !app->autoplay;
-    if (!app->autoplay)
-        set_status(app, "Autoplay off");
-    else
+    if (app->autoplay) {
+        app->loop = 0;
         set_status(app, "Autoplay on");
+    } else {
+        set_status(app, "Autoplay off");
+    }
+    redraw(app);
+}
+
+static void toggle_loop(struct AppState *app)
+{
+    app->loop = !app->loop;
+    if (app->loop) {
+        app->autoplay = 0;
+        mt_SongEnd = 0;
+        set_status(app, "Loop on");
+    } else {
+        set_status(app, "Loop off");
+    }
     redraw(app);
 }
 
@@ -1438,7 +1470,7 @@ int main(void)
                 layout(&app);
                 redraw(&app);
             } else if (cls == IDCMP_INTUITICKS) {
-                check_autoplay(&app);
+                check_playback_end(&app);
             } else if (cls == IDCMP_MOUSEBUTTONS && code == SELECTDOWN) {
                 if (hit(&app.play, mx, my))
                     do_play(&app);
@@ -1450,6 +1482,8 @@ int main(void)
                     do_save(&app);
                 else if (hit_checkbox(&app.autoplay_box, mx, my))
                     toggle_autoplay(&app);
+                else if (hit_checkbox(&app.loop_box, mx, my))
+                    toggle_loop(&app);
             }
         }
     }
