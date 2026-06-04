@@ -5,7 +5,7 @@ mods.c64.social MOD archive service.
 
 Version:
 
-    MajaPlayer v0.4 by Marcel Jaehne (c)2026
+    MajaPlayer v0.5 by Marcel Jaehne (c)2026
 
 ## Scope
 
@@ -13,8 +13,8 @@ Version:
 - 68000 compatible
 - Network and file transfer buffers are static to avoid small Workbench stack crashes
 - Uses `bsdsocket.library` for HTTP downloads
-- Fetches `http://mods.c64.social/api/list.txt` and chooses a random MOD locally
-- Falls back to `http://mods.c64.social/api/random.txt` if the list cannot be read
+- Fetches server-side random metadata from `http://mods.c64.social/api/random.php` when available
+- Falls back to local random selection from `api/list.txt` and then static `api/random.txt`
 - Downloads the current MOD to:
   - `RAM:MajaPlayer.mod`
 - Optional Save button copies the current MOD to:
@@ -57,7 +57,4 @@ The debug build writes fetch diagnostics to:
 
 ## Random selection
 
-`api/random.txt` is static on nginx and only changes when the server index is
-regenerated. MajaPlayer therefore uses `api/list.txt` as the primary API and
-selects a random module on the Amiga. This keeps Skip useful even with a fully
-static HTTP server.
+`api/random.php` performs server-side random selection from `api/list.txt` and returns the same plain text format as `random.txt`. If PHP is not enabled on the web server, MajaPlayer falls back to loading `api/list.txt` and selecting a random module locally on the Amiga.

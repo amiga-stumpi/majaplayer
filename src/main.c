@@ -14,8 +14,9 @@
 
 #include "amitcp13/bsdsocket.h"
 
-#define MAJA_VERSION "MajaPlayer v0.4 by Marcel Jaehne (c)2026"
-#define MAJA_API_URL "http://mods.c64.social/api/random.txt"
+#define MAJA_VERSION "MajaPlayer v0.5 by Marcel Jaehne (c)2026"
+#define MAJA_API_URL "http://mods.c64.social/api/random.php"
+#define MAJA_STATIC_RANDOM_URL "http://mods.c64.social/api/random.txt"
 #define MAJA_LIST_URL "http://mods.c64.social/api/list.txt"
 #define MAJA_TEMP_FILE "RAM:MajaPlayer.mod"
 #define MAJA_SAVE_FILE "MajaPlayer_saved.mod"
@@ -823,19 +824,11 @@ static int fetch_random_mod_from_list(struct AppState *app)
     return 1;
 }
 
-static int fetch_random_mod_info(struct AppState *app)
+static int parse_random_api_response(struct AppState *app)
 {
     const char *title;
     const char *url;
 
-    if (fetch_random_mod_from_list(app))
-        return 1;
-
-    debug_write("LIST failed, fallback random.txt");
-    if (!http_get_small(MAJA_API_URL, g_api_buf, sizeof(g_api_buf))) {
-        set_status(app, g_last_error[0] ? g_last_error : "API failed");
-        return 0;
-    }
     if (!streq_prefix(g_api_buf, "OK")) {
         set_status(app, "API returned error");
         return 0;
@@ -852,6 +845,26 @@ static int fetch_random_mod_info(struct AppState *app)
     else
         str_copy(app->title, TITLE_SIZE, "Unknown MOD");
     return 1;
+}
+
+static int fetch_random_mod_info(struct AppState *app)
+{
+    debug_write("random.php fetch start");
+    if (http_get_small(MAJA_API_URL, g_api_buf, sizeof(g_api_buf))) {
+        if (parse_random_api_response(app))
+            return 1;
+    }
+
+    debug_write("random.php failed, fallback list.txt");
+    if (fetch_random_mod_from_list(app))
+        return 1;
+
+    debug_write("LIST failed, fallback random.txt");
+    if (!http_get_small(MAJA_STATIC_RANDOM_URL, g_api_buf, sizeof(g_api_buf))) {
+        set_status(app, g_last_error[0] ? g_last_error : "API failed");
+        return 0;
+    }
+    return parse_random_api_response(app);
 }
 
 static int copy_file(const char *src, const char *dst)

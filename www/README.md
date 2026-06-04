@@ -18,7 +18,8 @@ and CGI so a small Amiga HTTP client can parse it easily.
 www/
   index.txt              Human-readable service description
   api/
-    random.txt           Current random module metadata
+    random.php           Server-side random module metadata, if PHP is enabled
+    random.txt           Static fallback random module metadata
     list.txt             Full module metadata list
   mods/
     put .mod files here
@@ -102,3 +103,20 @@ parts are:
 - no gzip for API or MOD files
 - `.mod` files served as `application/octet-stream`
 - subdirectories and spaces in MOD paths are okay; API paths use `%20` etc.
+
+## Server-side random endpoint
+
+`api/random.php` reads `api/list.txt`, chooses one indexed MOD with reservoir
+sampling, and returns the same plain text fields as `api/random.txt`:
+
+```text
+OK
+ID=...
+TITLE=...
+SIZE=...
+PATH=...
+URL=...
+```
+
+This requires PHP support in nginx, usually through php-fpm. If PHP is not
+available, clients can still use `api/list.txt` and choose locally.
