@@ -1554,8 +1554,8 @@ static void do_info(struct AppState *app)
     struct ButtonRect ok;
 
     memset(&nw, 0, sizeof(nw));
-    nw.LeftEdge = 8;
-    nw.TopEdge = 12;
+    nw.LeftEdge = 0;
+    nw.TopEdge = 0;
     nw.Width = 300;
     nw.Height = 160;
     nw.DetailPen = 0;
